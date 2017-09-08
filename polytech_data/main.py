@@ -5,7 +5,8 @@ import pygame
 from tabulate import tabulate
 
 #Constants for rendering
-FPS = 30
+FPS = 60
+TIMESCALE = 10
 SIZE = (500, 500)
 
 #Colors
@@ -200,7 +201,7 @@ def main(filename):
         screen.fill(WHITE)
     
         #Draw all points to screen.
-        i = (i+10) % 10000
+        i = (i+TIMESCALE) % DISPLACEMENT_POINTS
         print(i)
         for node in node_data:
             draw_node(screen, node,i)
