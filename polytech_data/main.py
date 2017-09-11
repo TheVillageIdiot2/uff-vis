@@ -5,13 +5,15 @@ import pygame
 from tabulate import tabulate
 
 #Constants for rendering
-FPS = 60
+FPS = 30
 TIMESCALE = 10
 SIZE = (500, 500)
+FONT = None #Set later
 
 #Colors
 WHITE = (255,255,255)
 BLACK = (  0,  0,  0)
+BLUE  = (  0,  0,255)
 
 #Constants for extracting data
 TYPE_VERTEX = 15
@@ -24,7 +26,6 @@ ID2_Z_DISPLACEMENT = "Response Z  Displacement"
 #Don't print these keys. Junk data
 IGNORE_LIST = ["unit_exp", "axis_lab", "func_type", "ver_num", "ref_ent_name", "orddenom"]
 GROWTH_SCALAR = 50_000
-DISPLACEMENT_POINTS = 10_000
 
 #Just holds xyz data
 class Vec3:
@@ -104,6 +105,7 @@ class NodeData:
 
     #Constructs the vertex data out of the givend ata set
     def __init__(self, data_set, node_id):
+        self.id = node_id
         #Find vertex data set
         self.base_postion = NodeData.get_base_position(data_set, node_id)
 
@@ -165,6 +167,16 @@ def draw_node(surface, node_data, disp_index=-1):
     #Draw
     draw_point(surface, *screen_pos.tuple())
 
+    if False:
+        # render text
+        global FONT
+        FONT = FONT or pygame.font.SysFont("dejavusans", 8)
+        label = FONT.render(str(node_data.id), True, BLACK, WHITE)
+        label_pos = screen_pos.tuple()[1:]
+        surface.blit(label, label_pos)
+
+
+
 def main(filename):
     #Open the UFF data
     data_file = pyuff.UFF(filename)
@@ -178,9 +190,11 @@ def main(filename):
 
     #Get vertices
     node_data = [NodeData(data_set, node_num) for node_num in range(1,25)]
+    displacement_points = len(node_data[0].displacements)
 
     #Init pygame
     pygame.init()
+    pygame.font.init()
     screen = pygame.display.set_mode(SIZE)
     clock = pygame.time.Clock()
 
@@ -201,10 +215,10 @@ def main(filename):
         screen.fill(WHITE)
     
         #Draw all points to screen.
-        i = (i+TIMESCALE) % DISPLACEMENT_POINTS
+        i = (i+TIMESCALE) % displacement_points
         print(i)
         for node in node_data:
-            draw_node(screen, node,i)
+            draw_node(screen, node, i)
 
         #Push all rendered data to screen
         pygame.display.flip()
