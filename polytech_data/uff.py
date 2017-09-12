@@ -242,11 +242,13 @@ class UffFunctionAtNode:
         self.load_case_id_num           = int(sc.get(10))
 
         self.response                   = {}
+        sc.get(1) #To handle '1X'
         self.response["entity_name"]    = sc.get(10)
         self.response["node"]           = int(sc.get(10))
         self.response["direction"]      = int(sc.get(4))
 
         self.reference                  = {}
+        sc.get(1) #To handle '1X'
         self.reference["entity_name"]   = sc.get(10)
         self.reference["node"]          = int(sc.get(10))
         self.reference["direction"]     = int(sc.get(4))
@@ -300,7 +302,7 @@ class UffFunctionAtNode:
             if spacing == ABSCISSA_SPACING_EVEN:
                 candidates.remove(AXIS_ABSCISSA)
             #Remove unused
-            candidates = [n for n in candidates if self.axises[n]["data"] is not None]
+            candidates = [n for n in candidates if self.axis[n]["data"] is not None]
             
             #Return axis dicts
             return [self.axis[n] for n in candidates]
@@ -326,8 +328,14 @@ class UffFunctionAtNode:
             for rec in rec_yielder(6, 13):
                 datum = float(rec)
                 next(target_data_axis)["data"].append(rec)
+        elif self.ord_data_type == ORDINATE_COMPLEX_SINGLE:
+            for rec in rec_yielder(6, 26):
+                real = float(rec[:13])
+                imag = float(rec[13:])
+                datum = (real, imag)
+                next(target_data_axis)["data"].append(rec)
         else:
-            raise Exception("Cannot yet handle this type")
+            raise Exception("Cannot yet handle this type: {}\n\n{}".format(self.ord_data_type, self.raw_text))
 
 
 
@@ -348,7 +356,8 @@ def main():
     else:
         fn = "test.unv"
     a = parse_file(fn)
-    #print(a)
+    for elem in a:
+        print(elem)        
 
 if __name__ == "__main__":
     main()
