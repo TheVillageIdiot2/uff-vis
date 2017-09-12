@@ -4,6 +4,9 @@ import sys
 import pygame
 from tabulate import tabulate
 
+#Modal stuff
+PRINT_DATASETS = True
+
 #Constants for rendering
 FPS = 30
 TIMESCALE = 10
@@ -24,7 +27,8 @@ ID2_Y_DISPLACEMENT = "Response Y  Displacement"
 ID2_Z_DISPLACEMENT = "Response Z  Displacement"
 
 #Don't print these keys. Junk data
-IGNORE_LIST = ["unit_exp", "axis_lab", "func_type", "ver_num", "ref_ent_name", "orddenom"]
+#IGNORE_LIST = ["unit_exp", "axis_lab", "func_type", "ver_num", "ref_ent_name", "orddenom"]
+IGNORE_LIST = []
 GROWTH_SCALAR = 50_000
 
 #Just holds xyz data
@@ -44,7 +48,7 @@ class Vec3:
         if isinstance(other, Vec3):
             return Vec3(self.x + other.x, self.y + other.y, self.z + other.z)
         else:
-            raise Exception("You can't add other shit to a vec3, numbnuts")
+            raise Exception("You can't add other to a vec3, numbnuts")
 
 
 #Class which holds the initial position and all displacements
@@ -175,8 +179,6 @@ def draw_node(surface, node_data, disp_index=-1):
         label_pos = screen_pos.tuple()[1:]
         surface.blit(label, label_pos)
 
-
-
 def main(filename):
     #Open the UFF data
     data_file = pyuff.UFF(filename)
@@ -184,9 +186,10 @@ def main(filename):
 
 
     #Print out all our data
-    for datum in data_set:
-        #print_keys(datum)
-        pass
+    if PRINT_DATASETS:
+        for datum in data_set:
+            print_keys(datum)
+            pass
 
     #Get vertices
     node_data = [NodeData(data_set, node_num) for node_num in range(1,25)]
