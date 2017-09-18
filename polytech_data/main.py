@@ -6,28 +6,33 @@ import render
 import numpy as np
 from tabulate import tabulate
 
+
+TIMESCALE = 10
+
 EXCEPTIONS=True
 RENDER_LABELS = True
 ID2_X_DISPLACEMENT = "Response X  Displacement"
 ID2_Y_DISPLACEMENT = "Response Y  Displacement"
 ID2_Z_DISPLACEMENT = "Response Z  Displacement"
 
+'''
+Philosophus:
+    None of these classes should store their own id.
+    That is the role of the calling function
+'''
 
-#Class which holds the initial position and id of a nodeclass NodeData(object):
+#Class which holds the initial position a node
 class NodeData(object):
-    #Gets a single node's data out of given uff node entry, or None if it does not exist
     def for_label(uff_nodes, node_label):
         for label, coord in zip(uff_nodes.labels, uff_nodes.coords):
             if label == node_label:
-                return NodeData(node_label, coord)
+                return NodeData(coord)
         if EXCEPTIONS:
             raise Exception("Could not find NodeData for node_id={}".format(node_id))
         else:
             return None
             
-    def __init__(self, label, position):
-        #Store id
-        self.label = label
+    def __init__(self, position):
         self.position = position
 
 
@@ -47,7 +52,7 @@ class DisplacementData(object):
                     z = d
 
         if not any(e is None for e in (x,y,z)):
-            return DisplacementData(node_label, x,y,z)
+            return DisplacementData(x,y,z)
         else:
             if EXCEPTIONS:
                 raise Exception("Could not find DisplacementData for node_id={}".format(node_id))
@@ -55,7 +60,7 @@ class DisplacementData(object):
                 return None
 
     #Creates displacement data object out of the given function data
-    def __init__(self, node_label, uff_x_func, uff_y_function, uff_z_function):
+    def __init__(self, uff_x_func, uff_y_func, uff_z_func):
         try:
             #Get displacements from each func set
             disp_x = uff_x_func.axis[uff.AXIS_ORDINATE]["data"]
@@ -63,7 +68,6 @@ class DisplacementData(object):
             disp_z = uff_z_func.axis[uff.AXIS_ORDINATE]["data"]
             disp_times = uff_z_func.axis[uff.AXIS_ABSCISSA]["data"] #z is arbitrary 
 
-            self.label = node_label
             self.disp_vecs = [np.array([x,y,z], dtype=np.float32) for x,y,z in zip(disp_x, disp_y, disp_z)]
             self.disp_times = disp_times
         except AttributeError:
@@ -81,69 +85,74 @@ class ElementData(object):
                 return None
 
         #Yield
-        label = uff_elements.labels[i]
         color = uff_elements.colors[i]
         nodes = uff_elements.elements[i]
-        return ElementData(label, color, nodes)
+        return ElementData(color, nodes)
             
                             
-    def __init__(self, label, color, node_labels): 
-        self.label = label
+    def __init__(self, color, node_labels): 
         self.color = color
         self.nodes = node_labels
         
 
 #Draws all node objects
-def draw_structure(surface, node_data, element_data, disp_index=-1):
+def draw_structure(all_node_data, all_disp_data, all_elem_data, disp_index=-1):
+    #Rendering without displacement
     if disp_index == -1:
-        displacement = np.zeros(3)
-    else:
-        displacement = node_data.displacements[disp_index]
-    #Build position of node at given time
-    pos = (node_data.base_postion + displacement)
+        for label, node in all_node_data.items():
+            render.render_node(node)
+        for label, elem in element_data.items():
+            render.render_element(element)
 
-    #Draw
-    render.render_node(surface, pos)
+    #Render with displacement
+    else:
+        for label, node in all_node_data.items():
+            disp = all_disp_data[label]
+            render.render_displaced_node(node, disp, disp_index)
+        for label, elem in all_elem_data.items():
+            render.render_displaced_element(elem, all_node_data, all_disp_data, disp_index)
 
     if RENDER_LABELS:
-        render_label(surface, pos, str(node_data.id))
+        ...
+        #render_label(surface, pos, str(node_data.id))
 
 def main(filename):
     #Open the UFF data
     data_set = uff.parse_file(filename)
 
     #Parse into more useful formats
-    node_data, element_data, displacement_data = {}, {}, {}
+    all_node_data = {}
+    all_disp_data = {}
+    all_elem_data = {} 
+
     for d in data_set:
         #If UffNodes, build node_data
         if isinstance(d, uff.UffNodes):
             for label in d.labels:
-                node_data[label] = NodeData.for_label(d, label)
+                all_node_data[label] = NodeData.for_label(d, label)
 
         #If UffElements, build element_data
         if isinstance(d, uff.UffElements):
             for label in d.labels:
-                element_data[label] = ElementData.for_label(label)
+                all_elem_data[label] = ElementData.for_label(d, label)
 
     #Once have nodes, gather specific data from them
-    for node_label in node_data.keys():
-        displacement_data[node_label] = DisplacementData.for_label()
+    for node_label in all_node_data.keys():
+        all_disp_data[node_label] = DisplacementData.for_label(data_set, node_label)
 
-    node_data = [NodeData(data_set, node_num) for node_num in range(1,25)]
-    element_data = [ElementData(data_set
-    displacement_count = len(node_data[0].displacements)
 
-    screen = render.init_render()
+    #Get total number of displacements for loop purposes
+    displacement_count = len(next(iter(all_disp_data.values())).disp_vecs)
+
+    #Start rendrin
+    render.init_render()
+
     #Main loop
     i=0
     while True:
-        #Handle events
-        render.handle_events()
-
         #Draw all points to screen.
         i = (i+TIMESCALE) % displacement_count
-        print(i)
-        draw_structure(screen, node_data, element_data, i)
+        draw_structure(all_node_data, all_disp_data, all_elem_data, i)
 
         #Write out and handle events
         if render.tick():
