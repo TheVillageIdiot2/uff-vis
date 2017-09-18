@@ -1,2 +1,0 @@
-pyuff=*
-pygame=*
