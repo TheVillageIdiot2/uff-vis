@@ -1,7 +1,7 @@
 #!/usr/bin/python
 import sys
 import itertools
-
+import numpy as np
 
 #Strings to match
 UFF_DATASET_SEP         = "    -1\n"
@@ -35,6 +35,8 @@ def _pair_iter(iterable, pair_cardinality):
         #Build pair
         pair.append(elem)
         index += 1
+    if index == pair_cardinality:
+        yield tuple(pair)
 
 class _str_consumer(object):
     def __init__(self,s):
@@ -162,8 +164,10 @@ class UffNodes(UffEntry):
         self.coord_systems = []
         self.disp_systems = []
         self.colors = []
-        self.coordinates = []
+        self.coords = []
+        i = 0
         for rec1,rec2 in _pair_iter(raw_text.splitlines(), 2):
+            i+= 1
             #Get label
             sc = _str_consumer(rec1)
             self.labels.append( int(sc.get(10)) )
@@ -179,7 +183,8 @@ class UffNodes(UffEntry):
             x = float(sc.get(25))
             y = float(sc.get(25))
             z = float(sc.get(25))
-            self.coordinates.append((x,y,z))
+            vec = np.array([x,y,z])
+            self.coords.append(vec)
 
 class UffElements:
     TYPE_NUMBER = 2412
@@ -189,13 +194,13 @@ class UffElements:
         #non-beam elements
         lines = raw_text.splitlines()
 
-        self.labels = []
-        self.fe_descriptor_ids = []
-        self.physical_prop_tables = []
-        self.material_prop_tables = []
-        self.colors = []
-        self.num_nodes = []
-        self.elements = []
+        self.labels                 = []
+        self.fe_descriptor_ids      = []
+        self.physical_prop_tables   = []
+        self.material_prop_tables   = []
+        self.colors                 = []
+        self.num_nodes              = []
+        self.elements               = []
         for rec1,rec2 in _pair_iter(raw_text.splitlines(), 2):
             sc = _str_consumer(rec1)
             #Get label

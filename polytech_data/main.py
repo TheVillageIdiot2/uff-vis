@@ -1,237 +1,122 @@
 #!/usr/bin/python
-import pyuff
 import sys
+import uff
 import pygame
+import render
+import numpy as np
 from tabulate import tabulate
 
-#Modal stuff
-PRINT_DATASETS = True
 
-#Constants for rendering
-FPS = 30
-TIMESCALE = 10
-SIZE = (500, 500)
-FONT = None #Set later
-
-#Colors
-WHITE = (255,255,255)
-BLACK = (  0,  0,  0)
-BLUE  = (  0,  0,255)
-
-#Constants for extracting data
-TYPE_VERTEX = 15
-TYPE_DISPLACEMENT = 58
-
+RENDER_LABELS = True
 ID2_X_DISPLACEMENT = "Response X  Displacement"
 ID2_Y_DISPLACEMENT = "Response Y  Displacement"
 ID2_Z_DISPLACEMENT = "Response Z  Displacement"
 
-#Don't print these keys. Junk data
-#IGNORE_LIST = ["unit_exp", "axis_lab", "func_type", "ver_num", "ref_ent_name", "orddenom"]
-IGNORE_LIST = []
-GROWTH_SCALAR = 50_000
-
-#Just holds xyz data
-class Vec3:
-    def __init__(self, x=0, y=0, z=0):
-        self.x = x
-        self.y = y
-        self.z = z
-
-    def tuple(self):
-        return self.x, self.y, self.z
-
-    def copy(self):
-        return Vec3(self.x, self.y, self.z)
-
-    def __add__(self, other):
-        if isinstance(other, Vec3):
-            return Vec3(self.x + other.x, self.y + other.y, self.z + other.z)
-        else:
-            raise Exception("You can't add other to a vec3, numbnuts")
-
 
 #Class which holds the initial position and all displacements
 #of a single vertex
-class NodeData:
-    @classmethod
-    def get_base_position(cls, data_set, target_node_id):
-        '''
-        Returns a Vec3 containing the specified node's base position
-        Returns None on failure
-        '''
-        for d in data_set:
-            if d.get('type') == TYPE_VERTEX:
-                #Once found vertex dataset, search for the correct node index
-                for node_index, node_id in enumerate(d.get('node_nums')):
-                    if node_id == target_node_id:
-                        vert_x = d.get('x')[node_index]
-                        vert_y = d.get('y')[node_index]
-                        vert_z = d.get('z')[node_index]
-
-                        #Construct base position
-                        vert = Vec3(vert_x, vert_y, vert_z)
-                        return vert
-
-
-        #If failed to find, just give up and go home
-        return None
-
-    @classmethod
-    def get_displacements(cls, data_set, node_id):
-        '''
-        Returns (displacements, times), where
-        - displacements = is a list of Displacement objects,
-        - times = a list of decimal values representing times
-        Both lists are of equivalent length, and correspond 1:1 in elements.
-        Returns None,None on failure
-        '''
-        #First gather the data from data_set
-        disp_x, disp_y, disp_z, disp_times = None, None, None, None
-        for d in data_set:
-            if d.get('type') == TYPE_DISPLACEMENT and d.get('rsp_node') == node_id:
-                id2 = d.get('id2')
-                if      id2 == ID2_X_DISPLACEMENT:
-                    disp_x = d.get('data')
-                elif    id2 == ID2_Y_DISPLACEMENT:
-                    disp_y = d.get('data')
-                elif    id2 == ID2_Z_DISPLACEMENT:
-                    disp_z = d.get('data')
-                    disp_times = d.get('x') # COuldve been anywhere else but whatever
-
-        #If all goes well we will return a valid list, else nothing
-        if (disp_x is not None) and (disp_y is not None) and (disp_z is not None) and (disp_times is not None):
-            #Combine them
-            return [Vec3(x,y,z) for x,y,z in zip(disp_x, disp_y, disp_z)], disp_times
-        else:
-            #Return nothing if invalid
-            return None, None
-
-    #Constructs the vertex data out of the givend ata set
-    def __init__(self, data_set, node_id):
+class NodeData(object):
+    #Gets node data out of given uff node entry
+    def __init__(self, uff_nodes, node_id):
+        #Store id
         self.id = node_id
-        #Find vertex data set
-        self.base_postion = NodeData.get_base_position(data_set, node_id)
 
-        #If didn't find vertex data set, fail
-        if not self.base_postion:
-            raise Exception("Failed to find vertex position for node_id {}".format(node_id))
+        #Get position, exit on success
+        for label, coord in zip(d.labels, d.coords):
+            if label == target_node_id:
+                self.postion = coord
+                return
 
-        #Now find displacements
-        self.displacements, self.disp_times = NodeData.get_displacements(data_set, node_id)
-        if (self.displacements is None) or (self.disp_times is None):
-            raise Exception("Failed to find displacements/times for node_id {}".format(node_id))
+        #If reach this position, failed to find position
+        raise Exception("Unable to find node id {} in uff_nodes".format(node_id))
 
-#Pretty prints all the keys in a dict, ignoring those keys in IGNORE_LIST
-def print_keys(elem):
-    kvp = []
-    for key in elem:
-        val = elem[key]
 
-        if not any(ielem in key for ielem in IGNORE_LIST):
-            kvp.append([key, val])
+class DisplacementData(object):
+    def for_node(data_set, node_id):
+        x,y,z = None,None,None
+        for d in data_set:
+            if isinstance(d, uff.UffFunctionAtNode) and d.response["node"] == node_id:
+                id2 = d.ids[1]
+                if      id2 == ID2_X_DISPLACEMENT:
+                    x = d
+                elif    id2 == ID2_Y_DISPLACEMENT:
+                    y = d
+                elif    id2 == ID2_Z_DISPLACEMENT:
+                    z = d
 
-    #If any kvp's valid in element, print them outs
-    if kvp:
-        print(tabulate(kvp, headers=['key', 'value']))
-        input()
+        if not any(e is None for e in (x,y,z)):
+            return DisplacementData(x,y,z)
+        else:
+            return None
 
-def draw_point(surface, x, y, z):
-    radius = 2 + abs(x)
-    pygame.draw.circle(surface, BLACK, (y, z), radius)
+    def __init__(self, uff_x_func, uff_y_function, uff_z_function):
+        try:
+            #Get displacements from each func set
+            disp_x = uff_x_func.axis[uff.AXIS_ORDINATE]["data"]
+            disp_y = uff_y_func.axis[uff.AXIS_ORDINATE]["data"]
+            disp_z = uff_z_func.axis[uff.AXIS_ORDINATE]["data"]
+            disp_times = uff_z_func.axis[uff.AXIS_ABSCISSA]["data"] #z is arbitrary 
 
-#Converts from the [-1,1] space to SIZE
-def to_screen_space(x,y,z):
-    #Convert to fraction of [-1,1]
-    fy = (y + 1) / 2
-    fz = (z + 1) / 2
-    
-    #Convert to rough screen space
-    sy = fy * SIZE[0]
-    sz = fz * SIZE[1]
+            self.disp_vecs = [np.array([x,y,z], dtype=np.float32) for x,y,z in zip(disp_x, disp_y, disp_z)]
+            self.disp_times = disp_times
+        except AttributeError:
+            raise Exception("Invalid uff data provided to DisplacementData")
 
-    #Bound to screen
-    sy = max(0, min(sy, SIZE[0] - 1))
-    sz = max(0, min(sz, SIZE[1] - 1))
 
-    return int(x*GROWTH_SCALAR), int(sy), int(sz)
+class ElementData(object):
+    def __init__(self, uff_elements):
+        
 
-#Draws a single NodeData object
-def draw_node(surface, node_data, disp_index=-1):
+#Draws all node objects
+def draw_structure(surface, node_data, element_data, disp_index=-1):
     if disp_index == -1:
-        displacement = Vec3()
+        displacement = np.zeros(3)
     else:
         displacement = node_data.displacements[disp_index]
     #Build position of node at given time
-    pos = (node_data.base_postion + displacement).copy()
-
-    #Convert x and y to screen space
-    screen_pos = Vec3(*to_screen_space(*pos.tuple()))
+    pos = (node_data.base_postion + displacement)
 
     #Draw
-    draw_point(surface, *screen_pos.tuple())
+    render.render_node(surface, pos)
 
-    if False:
-        # render text
-        global FONT
-        FONT = FONT or pygame.font.SysFont("dejavusans", 8)
-        label = FONT.render(str(node_data.id), True, BLACK, WHITE)
-        label_pos = screen_pos.tuple()[1:]
-        surface.blit(label, label_pos)
+    if RENDER_LABELS:
+        render_label(surface, pos, str(node_data.id))
 
 def main(filename):
     #Open the UFF data
-    data_file = pyuff.UFF(filename)
-    data_set = data_file.read_sets()
+    data_set = uff.parse_file(filename)
 
+    #Parse into more useful formats
+    node_data, element_data, displacement_data = {}, {}, {}
+    for d in data_set:
+        #If UffNodes, build node_data
+        if isinstance(d, uff.UffNodes):
+            for label in d.labels:
+                node_data[label] = NodeData(d, label)
 
-    #Print out all our data
-    if PRINT_DATASETS:
-        for datum in data_set:
-            print_keys(datum)
-            pass
+        #If 
 
-    #Get vertices
     node_data = [NodeData(data_set, node_num) for node_num in range(1,25)]
-    displacement_points = len(node_data[0].displacements)
+    element_data = [ElementData(data_set
+    displacement_count = len(node_data[0].displacements)
 
-    #Init pygame
-    pygame.init()
-    pygame.font.init()
-    screen = pygame.display.set_mode(SIZE)
-    clock = pygame.time.Clock()
-
+    screen = render.init_render()
     #Main loop
-    done = False
     i=0
-    while not done:
+    while True:
         #Handle events
-        for event in pygame.event.get():
-            #Quit if prompted
-            if event.type == pygame.QUIT:
-                done = True
-            elif event.type == pygame.KEYDOWN:
-                done = True
+        render.handle_events()
 
-
-        #Render stuff
-        screen.fill(WHITE)
-    
         #Draw all points to screen.
-        i = (i+TIMESCALE) % displacement_points
+        i = (i+TIMESCALE) % displacement_count
         print(i)
-        for node in node_data:
-            draw_node(screen, node, i)
+        draw_structure(screen, node_data, element_data, i)
 
-        #Push all rendered data to screen
-        pygame.display.flip()
+        #Write out and handle events
+        if render.tick():
+            break
 
-        #Set fps
-        clock.tick(FPS)
-
-
-    pygame.quit()
-
+    render.stop_render()
 
 if __name__ == '__main__':
     #If given, read from a particular file
