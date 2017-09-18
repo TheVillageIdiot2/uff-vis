@@ -9,7 +9,7 @@ from tabulate import tabulate
 
 TIMESCALE = 10
 
-EXCEPTIONS=True
+EXCEPTIONS=False
 RENDER_LABELS = True
 ID2_X_DISPLACEMENT = "Response X  Displacement"
 ID2_Y_DISPLACEMENT = "Response Y  Displacement"
@@ -54,9 +54,11 @@ class DisplacementData(object):
         if not any(e is None for e in (x,y,z)):
             return DisplacementData(x,y,z)
         else:
+            errstr = "Could not find DisplacementData for node_id={}".format(node_label)
             if EXCEPTIONS:
-                raise Exception("Could not find DisplacementData for node_id={}".format(node_id))
+                raise Exception(errstr)
             else:
+                print(errstr)
                 return None
 
     #Creates displacement data object out of the given function data
@@ -79,9 +81,11 @@ class ElementData(object):
         #Find the label
         i = uff_elements.labels.index(element_label)
         if i == -1:
+            errstr = "Could not find Element with id={}".format(element_id)
             if EXCEPTIONS:
-                raise Exception("Could not find Element with id={}".format(element_id))
+                raise Exception(errstr)
             else:
+                print(errstr)
                 return None
 
         #Yield
@@ -89,7 +93,6 @@ class ElementData(object):
         nodes = uff_elements.elements[i]
         return ElementData(color, nodes)
             
-                            
     def __init__(self, color, node_labels): 
         self.color = color
         self.nodes = node_labels
@@ -142,7 +145,30 @@ def main(filename):
 
 
     #Get total number of displacements for loop purposes
-    displacement_count = len(next(iter(all_disp_data.values())).disp_vecs)
+    displacement_count = 0
+    for v in all_disp_data.values():
+        if v:
+            displacement_count = len(v.disp_vecs)
+            break
+
+
+    #Analyze and output the different thingies
+    funcs = []
+    for d in data_set:
+        if isinstance(d, uff.UffFunctionAtNode):
+            ids = ", ".join(d.ids[:2])
+            axis_labels = [a["label"] for a in d.axis.values()]
+            axisnames = ", ".join(l.strip() for l in axis_labels if l)
+            addition = {
+                "ids": ids,
+                "axisnames": axisnames,
+            }
+            if addition not in funcs:
+                funcs.append(addition)
+
+    for f in funcs:
+        print("Func: {}\nAxis: {}\n".format(f["ids"], f["axisnames"]))
+
 
     #Start rendrin
     render.init_render()

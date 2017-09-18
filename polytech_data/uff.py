@@ -2,6 +2,10 @@
 import sys
 import itertools
 import numpy as np
+import time
+import threading
+
+VERBOSE=True
 
 #Strings to match
 UFF_DATASET_SEP         = "    -1\n"
@@ -60,6 +64,8 @@ def _get_sections(file_lines):
     and end is the line index of where the data ends (the terminating -1)
     '''
 
+    if VERBOSE: print("Scanning for sections")
+
     #Create list to hold returned values
     retvals = []
 
@@ -103,14 +109,14 @@ def _iterate_sections(filename):
 
     sections = _get_sections(lines)
     for sect in sections:
-        text = "".join(lines[sect[1] : sect[2]])
-        yield UffEntry(sect[0], text)
+        sec_lines = lines[sect[1] : sect[2]]
+        yield UffEntry(sect[0], sec_lines)
 
 class UffEntry(object):
     TYPE_NUMBER = -1 #-1 here used for flag of unassigned
-    def __init__(self, type_num, text):
+    def __init__(self, type_num, lines):
         self.type = type_num
-        self.raw_text = text
+        self.lines = lines
 
     def get_type(self):
         return self.type
@@ -124,17 +130,17 @@ class UffEntry(object):
             UFF_TYPES = [UffHeader, UffUnits, UffNodes, UffElements, UffFunctionAtNode]
             for uff_type in UFF_TYPES:
                 if self.type == uff_type.TYPE_NUMBER:
-                    return uff_type(self.raw_text)
+                    return uff_type(self.lines)
 
             #Failed to refine, just return base
             return self
 
 class UffHeader(UffEntry):
     TYPE_NUMBER = 151
-    def __init__(self, raw_text):
-        UffEntry.__init__(self, UffHeader.TYPE_NUMBER, raw_text)
+    def __init__(self, lines):
+        UffEntry.__init__(self, UffHeader.TYPE_NUMBER, lines)
+
         #Parse stuff out of raw
-        lines = raw_text.splitlines()
         self.model_file = lines[0]
         self.model_description = lines[1]
         self.creation_program = lines[2]
@@ -149,15 +155,15 @@ class UffHeader(UffEntry):
 
 class UffUnits(UffEntry):
     TYPE_NUMBER = 164
-    def __init__(self, raw_text):
-        UffEntry.__init__(self,UffUnits.TYPE_NUMBER, raw_text)
+    def __init__(self, lines):
+        UffEntry.__init__(self,UffUnits.TYPE_NUMBER, lines)
         #We don't reallly care about this for now
         pass
 
 class UffNodes(UffEntry):
     TYPE_NUMBER = 2411
-    def __init__(self, raw_text):
-        UffEntry.__init__(self,UffNodes.TYPE_NUMBER, raw_text)
+    def __init__(self, lines):
+        UffEntry.__init__(self,UffNodes.TYPE_NUMBER, lines)
 
         #Parse each pair of records 
         self.labels = []
@@ -166,7 +172,7 @@ class UffNodes(UffEntry):
         self.colors = []
         self.coords = []
         i = 0
-        for rec1,rec2 in _pair_iter(raw_text.splitlines(), 2):
+        for rec1,rec2 in _pair_iter(lines, 2):
             i+= 1
             #Get label
             sc = _str_consumer(rec1)
@@ -186,14 +192,12 @@ class UffNodes(UffEntry):
             vec = np.array([x,y,z])
             self.coords.append(vec)
 
-class UffElements:
+class UffElements(UffEntry):
     TYPE_NUMBER = 2412
-    def __init__(self, raw_text):
-        UffEntry.__init__(self,UffElements.TYPE_NUMBER, raw_text)
+    def __init__(self, lines):
+        UffEntry.__init__(self,UffElements.TYPE_NUMBER, lines)
         #In our parsing we just presume that these are all
         #non-beam elements
-        lines = raw_text.splitlines()
-
         self.labels                 = []
         self.fe_descriptor_ids      = []
         self.physical_prop_tables   = []
@@ -201,7 +205,7 @@ class UffElements:
         self.colors                 = []
         self.num_nodes              = []
         self.elements               = []
-        for rec1,rec2 in _pair_iter(raw_text.splitlines(), 2):
+        for rec1,rec2 in _pair_iter(lines, 2):
             sc = _str_consumer(rec1)
             #Get label
             self.labels.append( int(sc.get(10)) )
@@ -224,15 +228,10 @@ class UffElements:
 
             self.elements.append(nodes)
 
-
-class UffFunctionAtNode:
+class UffFunctionAtNode(UffEntry):
     TYPE_NUMBER = 58
-    def __init__(self, raw_text):
-        UffEntry.__init__(self,UffFunctionAtNode.TYPE_NUMBER, raw_text)
-
-        #Theres quite a bit of data here :/
-        lines = raw_text.splitlines()
-
+    def __init__(self, lines):
+        UffEntry.__init__(self,UffFunctionAtNode.TYPE_NUMBER, lines)
         #Get ids from first 5 lines
         self.ids = lines[0:5]
 
@@ -248,13 +247,13 @@ class UffFunctionAtNode:
 
         self.response                   = {}
         sc.get(1) #To handle '1X'
-        self.response["entity_name"]    = sc.get(10)
+        self.response["entity_name"]    = sc.get(10).strip()
         self.response["node"]           = int(sc.get(10))
         self.response["direction"]      = int(sc.get(4))
 
         self.reference                  = {}
         sc.get(1) #To handle '1X'
-        self.reference["entity_name"]   = sc.get(10)
+        self.reference["entity_name"]   = sc.get(10).strip()
         self.reference["node"]          = int(sc.get(10))
         self.reference["direction"]     = int(sc.get(4))
 
@@ -279,13 +278,12 @@ class UffFunctionAtNode:
             self.axis[axisname]["len_exp"]  = int(sc.get(5))
             self.axis[axisname]["frc_exp"]  = int(sc.get(5))
             self.axis[axisname]["tmp_exp"]  = int(sc.get(5))
-            self.axis[axisname]["label"]    = sc.get(20)
-            self.axis[axisname]["unit"]     = sc.get(20)
+            sc.get(1)#To handle 1x
+            self.axis[axisname]["label"]    = sc.get(20).strip()
+            #sc.get(1)#To handle x
+            self.axis[axisname]["unit"]     = sc.get(20).strip()
             #Only create a data column if axis "exists"
-            if UFF_NONE in self.axis[axisname]["label"]:
-                self.axis[axisname]["data"] = None
-            else:
-                self.axis[axisname]["data"] = []
+            self.axis[axisname]["data"] = []
                 
         #Load records 12-infinity. 
         #Use this helper to iterate over records
@@ -306,11 +304,20 @@ class UffFunctionAtNode:
             #Remove abscissa if necessary
             if spacing == ABSCISSA_SPACING_EVEN:
                 candidates.remove(AXIS_ABSCISSA)
+
+            print(list(a["label"] for a in self.axis.values()))
+
             #Remove unused
-            candidates = [n for n in candidates if self.axis[n]["data"] is not None]
+            candidates = [n for n in candidates if self.axis[n]["label"] != UFF_NONE]
             
+            #Annoyingly, sometimes we have NO axis labels
+            #In this case, just use ordinate axis
+            if not len(candidates):
+                candidates = [AXIS_ORDINATE]
+                
             #Return axis dicts
             return [self.axis[n] for n in candidates]
+            
                 
         #Fills the absi
         def gen_abscissa():
@@ -340,18 +347,51 @@ class UffFunctionAtNode:
                 datum = (real, imag)
                 next(target_data_axis)["data"].append(rec)
         else:
-            raise Exception("Cannot yet handle this type: {}\n\n{}".format(self.ord_data_type, self.raw_text))
+            raise Exception("Cannot yet handle this type: {}\n\n{}".format(self.ord_data_type, self.lines))
 
 
+class _parse_progress_daemon(object):
+    def __init__(self, total_sections):
+        self._total = total_sections
+        self._thread = threading.Thread(target=self._thread_func)
+        self._thread.daemon = True
 
+        self.progress = 0
+        self.done = False
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self.done = True
+
+    def _thread_func(self):
+        while not self.done and self.progress < self._total:
+            time.sleep(0.5)
+            print("Scanned {}/{} sections".format(self.progress, self._total))
+
+    def increment(self):
+        self.progress += 1
 
 def parse_file(filename):
     '''
     Returns a list of UFF objects
     '''
-    sections = [x for x in _iterate_sections(filename)]
-    sections = [ue.refine() for ue in sections]
-    return sections
+    sections = _iterate_sections(filename)
+
+    if VERBOSE:
+        all_secs = list(sections)
+        sec_count = len(all_secs)
+        dm  = _parse_progress_daemon(sec_count)
+        dm.start() 
+        for i in range(sec_count):
+            dm.increment()
+            all_secs[i] = all_secs[i].refine()
+        dm.stop()
+        return all_secs
+    else:
+        return [ue.refine() for ue in sections]
+
 
 
 
